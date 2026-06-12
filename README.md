@@ -32,6 +32,8 @@ format specification and reference examples.
 git clone https://github.com/qiuskye/claude-skills ~/.claude/skills-qiuskye
 cp -r ~/.claude/skills-qiuskye/skills/changelog-pro ~/.claude/skills/
 cp -r ~/.claude/skills-qiuskye/skills/eda-quicklook ~/.claude/skills/
+| [`repo-onboard`](skills/repo-onboard/) | Understand any unknown repo in minutes — git-driven map, hot files, entry points, cited report | "explain this repo", "onboarding" |
+| [`token-diet`](skills/token-diet/) | Frugal mode: surgical reads, grep-first, hard token budgets with end-of-task metrics | "modo ahorro", "token diet" |
 ```
 
 Claude Code picks up skills from `~/.claude/skills/` automatically; start a new
