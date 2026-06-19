@@ -1,5 +1,6 @@
 # 🧰 claude-skills — hand-crafted skills for Claude Code
 
+[![Tests](https://github.com/qiuskye/claude-skills/actions/workflows/test.yml/badge.svg)](https://github.com/qiuskye/claude-skills/actions/workflows/test.yml)
 ![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)
 ![Dependencies: none](https://img.shields.io/badge/dependencies-none-blue.svg)
 ![Made for Claude Code](https://img.shields.io/badge/made%20for-Claude%20Code-orange.svg)
@@ -51,6 +52,26 @@ the folders into `<project>/.claude/skills/`.
   interpretation to what the profiler actually printed.
 - **Stdlib only.** Bundled scripts run on a bare `python3` — no `pip install`,
   no environment drift, nothing to break on a colleague's machine.
+
+## Running the tests
+
+The bundled scripts (`eda-quicklook` and `notebook-polish`) ship with
+deterministic unit tests that run on a bare `python3` — no test runner to
+install. From the repository root:
+
+```bash
+# Syntax-check the scripts
+python3 -m py_compile \
+  skills/eda-quicklook/scripts/eda.py \
+  skills/notebook-polish/scripts/nbcheck.py
+
+# Run the unit tests
+python3 -m unittest discover -s tests
+```
+
+The same two steps run in CI on Python 3.9–3.12 (see
+[`.github/workflows/test.yml`](.github/workflows/test.yml) and the **Tests**
+badge above).
 
 ## Credits
 

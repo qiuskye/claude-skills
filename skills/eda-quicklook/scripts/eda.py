@@ -6,7 +6,9 @@ Usage:
 
 Features:
     - Delimiter detection via csv.Sniffer (falls back to comma).
-    - Samples the first MAX_ROWS rows of large files.
+    - BOM-safe UTF-8 reading; undecodable bytes are replaced, never fatal.
+    - Samples the first MAX_ROWS rows of large files (read lazily, capped early
+      so huge files are never fully loaded into memory).
     - Per-column type inference: numeric, ISO date, or categorical.
     - Per-column report: non-null %, unique count, and either numeric stats
       with an 8-bin ASCII histogram or the top-5 categorical values.
@@ -22,6 +24,7 @@ import statistics
 import sys
 from collections import Counter
 from datetime import datetime
+from typing import List, Optional, Sequence, Tuple
 
 MAX_ROWS = 50_000          # cap rows read so huge files stay fast; rest is sampled
 SNIFF_BYTES = 64 * 1024    # bytes fed to csv.Sniffer for delimiter detection
@@ -39,24 +42,33 @@ MISSING_TOKENS = {
 }
 
 
-def detect_dialect(head):
-    """Return a csv dialect sniffed from the file head, or excel (comma)."""
+def detect_dialect(head: str) -> csv.Dialect:
+    """Return a csv dialect sniffed from the file head, or excel (comma).
+
+    ``head`` is a chunk of the file's text. csv.Sniffer can raise on ambiguous
+    or single-column input, in which case we fall back to the comma dialect.
+    """
     try:
         return csv.Sniffer().sniff(head, delimiters=",;\t|")
     except csv.Error:
         return csv.excel
 
 
-def is_missing(value):
-    """Treat empty strings and common NA tokens as missing."""
+def is_missing(value: Optional[str]) -> bool:
+    """Return True for None, empty strings, or common NA tokens.
+
+    Matching is whitespace- and case-insensitive, so ``" N/A "`` counts as
+    missing just like ``"na"``.
+    """
     return value is None or value.strip().lower() in MISSING_TOKENS
 
 
-def try_float(value):
+def try_float(value: str) -> Optional[float]:
     """Parse a finite float, accepting a decimal comma; return None on failure.
 
     Rejects inf/-inf/nan so non-finite values are never treated as numeric
-    (they would corrupt the stats and crash the histogram).
+    (they would corrupt the stats and crash the histogram). Surrounding
+    whitespace is ignored so values like ``" 1.5 "`` still parse.
     """
     text = value.strip()
     for candidate in (text, text.replace(",", ".") if "," in text and "." not in text else None):
@@ -71,11 +83,12 @@ def try_float(value):
     return None
 
 
-def looks_iso_date(value):
+def looks_iso_date(value: str) -> bool:
     """Check for a real ISO-8601 date: YYYY-MM-DD with an optional time part.
 
     Validates against the actual calendar via datetime.strptime, so impossible
-    dates like 2026-02-30 are rejected (not just range-checked).
+    dates like 2026-02-30 are rejected (not just range-checked). Surrounding
+    whitespace is ignored.
     """
     text = value.strip()
     if len(text) < 10:
@@ -87,11 +100,12 @@ def looks_iso_date(value):
     return True
 
 
-def infer_type(values):
+def infer_type(values: Sequence[str]) -> str:
     """Classify non-missing values as 'numeric', 'date', or 'categorical'.
 
     A column qualifies as numeric/date when at least NUMERIC_TYPE_RATIO of its
-    non-missing values parse as such, which tolerates a few dirty cells.
+    non-missing values parse as such, which tolerates a few dirty cells. An
+    empty column (no non-missing values) is treated as categorical.
     """
     if not values:
         return "categorical"
@@ -104,8 +118,14 @@ def infer_type(values):
     return "categorical"
 
 
-def ascii_histogram(numbers, bins=HIST_BINS, width=HIST_WIDTH):
-    """Return histogram lines: one '[lo, hi) bar count' line per bin."""
+def ascii_histogram(
+    numbers: Sequence[float], bins: int = HIST_BINS, width: int = HIST_WIDTH
+) -> List[str]:
+    """Return histogram lines: one '[lo, hi) bar count' line per bin.
+
+    Returns an empty list for no input, and a single "all values equal" line
+    when every value is identical (a zero-width range has no meaningful bins).
+    """
     if not numbers:
         return []
     lo, hi = min(numbers), max(numbers)
@@ -127,14 +147,24 @@ def ascii_histogram(numbers, bins=HIST_BINS, width=HIST_WIDTH):
     return lines
 
 
-def read_csv(path):
+def read_csv(path: str) -> Tuple[List[str], List[List[str]], bool]:
     """Read up to MAX_ROWS rows; return (header, rows, sampled_flag).
+
+    The file is opened with the ``utf-8-sig`` codec so a leading UTF-8 BOM is
+    stripped transparently (otherwise it would corrupt the first column name);
+    files without a BOM are read exactly as plain UTF-8. Undecodable bytes are
+    replaced rather than raising, so a mis-encoded file is still profiled.
+
+    Only the first MAX_ROWS data rows are kept in memory: the reader streams the
+    file lazily and stops early once the cap is hit, so an enormous file never
+    forces the whole thing to be loaded. ``sampled`` is True when that cap was
+    reached and trailing rows were skipped.
 
     Exits with a clean stderr message (no traceback) if the file cannot be
     opened or read, e.g. it is missing, a directory, or not readable.
     """
     try:
-        with open(path, "r", newline="", encoding="utf-8", errors="replace") as fh:
+        with open(path, "r", newline="", encoding="utf-8-sig", errors="replace") as fh:
             head = fh.read(SNIFF_BYTES)
             dialect = detect_dialect(head)
             fh.seek(0)
@@ -142,7 +172,8 @@ def read_csv(path):
             header = next(reader, None)
             if header is None:
                 sys.exit("error: file appears to be empty")
-            rows, sampled = [], False
+            rows: List[List[str]] = []
+            sampled = False
             for i, row in enumerate(reader):
                 if i >= MAX_ROWS:
                     sampled = True
@@ -153,12 +184,16 @@ def read_csv(path):
     return header, rows, sampled
 
 
-def column_values(rows, index):
-    """Extract the values of one column, padding short rows with ''."""
+def column_values(rows: Sequence[Sequence[str]], index: int) -> List[str]:
+    """Extract the values of one column, padding short rows with ''.
+
+    Ragged rows (fewer fields than the header) yield '' for the missing
+    column instead of raising an IndexError.
+    """
     return [row[index] if index < len(row) else "" for row in rows]
 
 
-def report_numeric(numbers):
+def report_numeric(numbers: Sequence[float]) -> None:
     """Print summary stats and a histogram for parsed numeric values."""
     print("    min={:g}  max={:g}  mean={:g}  median={:g}  stdev={:g}".format(
         min(numbers),
@@ -171,14 +206,17 @@ def report_numeric(numbers):
         print("  " + line)
 
 
-def report_categorical(values):
-    """Print the TOP_K most frequent values with counts."""
+def report_categorical(values: Sequence[str]) -> None:
+    """Print the TOP_K most frequent values with counts.
+
+    Long values are truncated to keep the output aligned and compact.
+    """
     for value, count in Counter(values).most_common(TOP_K):
         shown = value if len(value) <= 40 else value[:37] + "..."
         print("    {:>6}  {}".format(count, shown))
 
 
-def main(argv):
+def main(argv: Sequence[str]) -> None:
     if len(argv) != 2:
         sys.exit("usage: python3 eda.py <file.csv>")
     path = argv[1]

@@ -109,3 +109,32 @@ comes from, e.g. "uses Express (`package.json`)", "auth lives in
 for a claim in Steps 1-5, either omit it or mark it explicitly as a guess
 ("probablemente X — no verificado"). Never invent directories, frameworks, or
 behavior.
+
+## Example output
+
+A finished Step 6 report for a small Node CLI (abridged, in the user's
+language):
+
+> **Qué es** — CLI de Node/TypeScript que convierte facturas PDF a CSV.
+> Empaqueta con `tsup` y se publica como binario `inv2csv` (`package.json`).
+>
+> **Arquitectura en 5 líneas** — `src/cli.ts` parsea argumentos y orquesta;
+> `src/parser/` extrae campos del PDF (hot file: `parser/extract.ts`, 22
+> commits); `src/writer.ts` serializa a CSV. Sin estado ni red. Tests en
+> `test/` con `node:test`.
+>
+> **Dónde está cada cosa**
+>
+> | Concern        | Dónde                |
+> |----------------|----------------------|
+> | Entry point    | `src/cli.ts`         |
+> | Extracción PDF | `src/parser/`        |
+> | Salida CSV     | `src/writer.ts`      |
+>
+> **Por dónde empezar a tocar** — `src/cli.ts` (entry point) y
+> `src/parser/extract.ts` (hot file, 22 commits). Build/test:
+> `npm run build && npm test` (scripts en `package.json`).
+>
+> **Riesgos / deuda visible** — un solo contribuidor (bus factor 1,
+> `git shortlog`); `parser/extract.ts` concentra casi toda la actividad y
+> conviene vigilar su tamaño. Último commit hace 8 meses: repo poco activo.

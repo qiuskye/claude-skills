@@ -7,6 +7,7 @@ Usage:
 Stdlib only (json, sys, re). Parses the notebook JSON and reports:
   - cell counts (code / markdown / empty) and markdown/code ratio
   - unexecuted cells and out-of-order execution counts (reproducibility signal)
+  - error outputs saved in the file (a cell raised an exception when last run)
   - oversized outputs (> 50 KB, e.g. embedded base64 images)
   - duplicated and late imports
   - very long code cells (> 40 lines, candidates for functions)
@@ -18,6 +19,7 @@ Exit code: 0 if no warnings, 1 if warnings were found, 2 on usage/parse error.
 import json
 import re
 import sys
+from typing import Any, Optional
 
 MAX_OUTPUT_BYTES = 50 * 1024   # 50 KB
 MAX_CELL_LINES = 40
@@ -38,7 +40,7 @@ SMELL_NAME_RE = re.compile(
     r"|(?P<nbase>[A-Za-z_]*[A-Za-z])\d{1,2})$")
 
 
-def version_base(name):
+def version_base(name: str) -> Optional[str]:
     """Return the un-numbered base of a versioned candidate name, or None."""
     m = SMELL_NAME_RE.match(name)
     if not m:
@@ -46,7 +48,7 @@ def version_base(name):
     return m.group("vbase") or m.group("nbase")
 
 
-def cell_source(cell):
+def cell_source(cell: Any) -> str:
     """Return a cell's source as a single string, tolerating malformed cells.
 
     A well-formed notebook stores ``source`` as a string or a list of strings,
@@ -64,14 +66,37 @@ def cell_source(cell):
     return ""
 
 
-def output_size(cell):
+def output_size(cell: dict) -> int:
+    """Return the serialized byte length of a code cell's saved outputs.
+
+    Approximates how much weight the outputs add to the notebook file by
+    re-serializing them; 0 when the cell has no outputs. Used to flag oversized
+    outputs (e.g. embedded base64 images) that bloat the file and pollute diffs.
+    """
     outputs = cell.get("outputs", [])
     if not outputs:
         return 0
     return len(json.dumps(outputs))
 
 
-def fmt_size(n):
+def has_error_output(cell: dict) -> bool:
+    """Return True if a code cell has a saved error output (an exception).
+
+    Jupyter records an uncaught exception as an output with
+    ``output_type == "error"``. Its presence means the cell raised the last
+    time it ran, so the committed notebook does not run cleanly top to bottom —
+    a strong, deterministic reproducibility signal. Malformed (non-dict)
+    outputs are ignored so a single bad entry never aborts the report.
+    """
+    outputs = cell.get("outputs", [])
+    if not isinstance(outputs, list):
+        return False
+    return any(isinstance(o, dict) and o.get("output_type") == "error"
+               for o in outputs)
+
+
+def fmt_size(n: int) -> str:
+    """Format a byte count as a human-readable string (B / KB / MB)."""
     if n >= 1024 * 1024:
         return "%.1f MB" % (n / (1024 * 1024))
     if n >= 1024:
@@ -79,7 +104,12 @@ def fmt_size(n):
     return "%d B" % n
 
 
-def analyze(path):
+def analyze(path: str) -> int:
+    """Run all static checks on the notebook at ``path`` and print the report.
+
+    Returns the would-be exit code: 1 if any warnings were found, 0 otherwise.
+    Calls ``sys.exit(2)`` directly on unreadable or malformed notebook files.
+    """
     try:
         with open(path, encoding="utf-8") as f:
             nb = json.load(f)
@@ -141,10 +171,13 @@ def analyze(path):
 
     # --- Outputs -------------------------------------------------------------
     big_outputs = []
+    error_outputs = []  # cell indices whose saved output is an exception
     for i, cell in code_cells:
         size = output_size(cell)
         if size > MAX_OUTPUT_BYTES:
             big_outputs.append((i, size))
+        if has_error_output(cell):
+            error_outputs.append(i)
 
     # --- Imports -------------------------------------------------------------
     imports = []  # (cell_index, code_cell_position_1based, module, line)
@@ -239,6 +272,16 @@ def analyze(path):
         print("  Execution counts: in order")
 
     print("\n[Outputs]")
+    if error_outputs:
+        print("  Cells with saved error output: %s"
+              % ", ".join(map(str, error_outputs)))
+        warnings.append("%d cell(s) raised an exception when last run: %s — the "
+                        "notebook does not run cleanly top to bottom; fix the "
+                        "error(s) and re-run before committing."
+                        % (len(error_outputs),
+                           ", ".join(map(str, error_outputs))))
+    else:
+        print("  No cells with saved error output")
     if big_outputs:
         for i, size in big_outputs:
             print("  Cell %d: output is %s (> %s)"
@@ -299,7 +342,8 @@ def analyze(path):
     return 1 if warnings else 0
 
 
-def main():
+def main() -> None:
+    """CLI entry point: validate args, analyze the notebook, set the exit code."""
     if len(sys.argv) != 2:
         print("Usage: python3 nbcheck.py notebook.ipynb", file=sys.stderr)
         sys.exit(2)
