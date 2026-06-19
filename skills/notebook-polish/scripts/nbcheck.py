@@ -10,7 +10,7 @@ Stdlib only (json, sys, re). Parses the notebook JSON and reports:
   - oversized outputs (> 50 KB, e.g. embedded base64 images)
   - duplicated and late imports
   - very long code cells (> 40 lines, candidates for functions)
-  - versioned variable names (df2, df3, final_v2, ...) — naming smell
+  - versioned variable names (df + df2, final + final_v2, ...) — naming smell
 
 Exit code: 0 if no warnings, 1 if warnings were found, 2 on usage/parse error.
 """
@@ -25,14 +25,43 @@ MIN_MARKDOWN_RATIO = 0.20
 
 IMPORT_RE = re.compile(r"^\s*(?:import\s+([\w.]+)|from\s+([\w.]+)\s+import\b)")
 ASSIGN_RE = re.compile(r"^\s*([A-Za-z_]\w*)\s*=[^=]")
-SMELL_NAME_RE = re.compile(r"^(?:[A-Za-z_]*[A-Za-z]\d+|\w*_v\d+)$")
+# A *candidate* versioned name: an alphabetic base followed by either an
+# explicit "_v<num>" suffix (final_v2 -> base "final") or a small number
+# directly (df2 -> base "df"). The "_v" alternative is matched first and its
+# base captured separately so it is not swallowed by the generic base group.
+# A candidate is only reported as a smell once the un-numbered base is also
+# assigned in the notebook (see version_base), which avoids false positives on
+# identifiers whose trailing digit is intrinsic (utf8, base64, sha256, col2,
+# x1, model123).
+SMELL_NAME_RE = re.compile(
+    r"^(?:(?P<vbase>[A-Za-z_]*[A-Za-z])_v\d{1,3}"
+    r"|(?P<nbase>[A-Za-z_]*[A-Za-z])\d{1,2})$")
+
+
+def version_base(name):
+    """Return the un-numbered base of a versioned candidate name, or None."""
+    m = SMELL_NAME_RE.match(name)
+    if not m:
+        return None
+    return m.group("vbase") or m.group("nbase")
 
 
 def cell_source(cell):
+    """Return a cell's source as a single string, tolerating malformed cells.
+
+    A well-formed notebook stores ``source`` as a string or a list of strings,
+    but third-party tooling sometimes emits other shapes (a bare number, a list
+    containing nulls, a missing key). We coerce defensively so a single bad
+    cell never aborts the whole report.
+    """
+    if not isinstance(cell, dict):
+        return ""
     src = cell.get("source", "")
     if isinstance(src, list):
-        src = "".join(src)
-    return src
+        return "".join(s for s in src if isinstance(s, str))
+    if isinstance(src, str):
+        return src
+    return ""
 
 
 def output_size(cell):
@@ -54,17 +83,29 @@ def analyze(path):
     try:
         with open(path, encoding="utf-8") as f:
             nb = json.load(f)
-    except (OSError, json.JSONDecodeError) as e:
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError) as e:
         print("ERROR: cannot read notebook: %s" % e, file=sys.stderr)
         sys.exit(2)
 
+    if not isinstance(nb, dict):
+        print("ERROR: %s is not a notebook (top-level JSON is %s, expected an "
+              "object)" % (path, type(nb).__name__), file=sys.stderr)
+        sys.exit(2)
+
     cells = nb.get("cells", [])
+    if not isinstance(cells, list):
+        print("ERROR: %s has a malformed 'cells' field (expected a list, got "
+              "%s)" % (path, type(cells).__name__), file=sys.stderr)
+        sys.exit(2)
+
     warnings = []
 
     code_cells = []      # (cell_index_1based, cell)
     md_cells = []
     empty_cells = []     # cell indices
     for i, cell in enumerate(cells, start=1):
+        if not isinstance(cell, dict):
+            continue  # skip malformed (non-object) cell entries
         ctype = cell.get("cell_type")
         src = cell_source(cell)
         if not src.strip():
@@ -86,8 +127,10 @@ def analyze(path):
         ec = cell.get("execution_count")
         if ec is None:
             unexecuted.append(i)
-        else:
+        elif isinstance(ec, int) and not isinstance(ec, bool):
             exec_seq.append((i, ec))
+        # A non-integer execution_count is malformed; ignore it for the
+        # ordering check rather than crashing on the comparison below.
 
     out_of_order = []
     prev = None
@@ -132,14 +175,29 @@ def analyze(path):
             long_cells.append((i, n_lines))
 
     # --- Naming smells -------------------------------------------------------
-    smells = {}  # name -> set of cell indices
+    # First collect every assigned name, then only flag numbered names whose
+    # un-numbered base is also assigned (df + df2, final + final_v2). This
+    # confirms genuine versioning instead of flagging any identifier ending in
+    # a digit (utf8, base64, col2, ...), which produced noisy false positives.
+    assigned = {}     # name -> set of cell indices
+    candidates = {}   # numbered name -> (base, set of cell indices)
     for i, cell in code_cells:
         for line in cell_source(cell).splitlines():
             m = ASSIGN_RE.match(line)
-            if m:
-                name = m.group(1)
-                if SMELL_NAME_RE.match(name):
-                    smells.setdefault(name, set()).add(i)
+            if not m:
+                continue
+            name = m.group(1)
+            assigned.setdefault(name, set()).add(i)
+            base = version_base(name)
+            if base is not None:
+                _, cells_set = candidates.get(name, (base, set()))
+                cells_set.add(i)
+                candidates[name] = (base, cells_set)
+
+    smells = {}  # name -> set of cell indices
+    for name, (base, cells_set) in candidates.items():
+        if base in assigned:
+            smells[name] = cells_set
 
     # --- Report --------------------------------------------------------------
     print("=" * 60)

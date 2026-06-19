@@ -25,15 +25,15 @@ format specification and reference examples.
 |---|---|---|
 | [`changelog-pro`](skills/changelog-pro/SKILL.md) | Generates verified changelogs/release notes from git history: Conventional Commits parsing, noise filtering, issue/compare links, semver suggestion, idempotent `CHANGELOG.md` writes — every bullet must cite a real commit hash | "changelog", "release notes", "what has changed since…" |
 | [`eda-quicklook`](skills/eda-quicklook/SKILL.md) | Profiles a CSV with a zero-dependency Python script (types, missing %, stats, ASCII histograms, top values, warnings), then interprets the problems and suggests next steps | "explore this CSV", "EDA", "what does this data look like" |
+| [`notebook-polish`](skills/notebook-polish/SKILL.md) | Reviews and polishes Jupyter notebooks (`.ipynb`) for Data Science work, cleaning them up and making them presentable | "revisa mi notebook", "clean up this notebook", "deja el notebook presentable" |
+| [`repo-onboard`](skills/repo-onboard/SKILL.md) | Produces a fast, token-cheap orientation report for an unfamiliar repo using a deterministic git-based pipeline (file map, hot files, entry points, activity) with strict read budgets | "explain this repo", "onboarding", "qué hace este proyecto" |
+| [`token-diet`](skills/token-diet/SKILL.md) | Frugal-mode operating rules that minimize token consumption without losing output quality; stays active for the rest of the session until turned off | "modo ahorro", "token diet", "save tokens" |
 
 ## Installation
 
 ```bash
 git clone https://github.com/qiuskye/claude-skills ~/.claude/skills-qiuskye
-cp -r ~/.claude/skills-qiuskye/skills/changelog-pro ~/.claude/skills/
-cp -r ~/.claude/skills-qiuskye/skills/eda-quicklook ~/.claude/skills/
-| [`repo-onboard`](skills/repo-onboard/) | Understand any unknown repo in minutes — git-driven map, hot files, entry points, cited report | "explain this repo", "onboarding" |
-| [`token-diet`](skills/token-diet/) | Frugal mode: surgical reads, grep-first, hard token budgets with end-of-task metrics | "modo ahorro", "token diet" |
+cp -r ~/.claude/skills-qiuskye/skills/* ~/.claude/skills/
 ```
 
 Claude Code picks up skills from `~/.claude/skills/` automatically; start a new
