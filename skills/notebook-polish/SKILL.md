@@ -12,10 +12,13 @@ the report, then guide the cleanup in priority order.
 ## Step 1 — Run the checker
 
 ```bash
-python3 scripts/nbcheck.py path/to/notebook.ipynb
+python3 scripts/nbcheck.py "<path/al/notebook.ipynb>"
 ```
 
-(Resolve `scripts/nbcheck.py` relative to this skill's directory.)
+(Resolve `scripts/nbcheck.py` relative to this skill's directory. **Always quote
+the supplied path** so spaces or shell globs are not expanded — e.g.
+`python3 scripts/nbcheck.py "my notebook.ipynb"`. The script takes exactly one
+positional path argument, so do not add a `--` separator.)
 
 The report has sections: Cells, Execution order, Outputs, Imports, Long
 cells, Naming, and a final WARNINGS summary. Exit code 1 means warnings were
@@ -71,3 +74,31 @@ Translate each finding into plain language for the user:
   the notebook without explicit permission.
 - After each round of edits, re-run `nbcheck.py` to confirm the warnings are
   gone and show the user the before/after difference.
+
+## Example output
+
+Checker output (`python3 scripts/nbcheck.py "analysis.ipynb"`, abridged):
+
+```
+[Cells]
+  Code cells:      4
+  Markdown cells:  0
+  Markdown/code ratio: 0.00
+
+[Execution order]
+  Unexecuted code cells: 3
+  Out of order: cell 2 has execution_count 1 but cell 1 (earlier) has 3
+
+[WARNINGS]
+  - Markdown/code ratio 0.00 is below 0.20 — the notebook lacks narrative.
+  - Execution counts are not increasing top-to-bottom — likely run out of
+    order and may not be reproducible. Do Restart & Run All.
+  - Versioned variable names (df2) — use descriptive names instead.
+```
+
+Exit code `1` (warnings found). Interpretation handed to the user (Step 2):
+
+> Three issues, reproducibility first: the cells were run out of order, so
+> Restart & Run All may break — fix that before anything else. No markdown at
+> all, so add a title and section headers. Finally, rename `df2` to something
+> descriptive like `df_clean`. Want me to walk through them one cell at a time?

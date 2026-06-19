@@ -1,5 +1,6 @@
 # 🧰 claude-skills — hand-crafted skills for Claude Code
 
+[![Tests](https://github.com/qiuskye/claude-skills/actions/workflows/test.yml/badge.svg)](https://github.com/qiuskye/claude-skills/actions/workflows/test.yml)
 ![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)
 ![Dependencies: none](https://img.shields.io/badge/dependencies-none-blue.svg)
 ![Made for Claude Code](https://img.shields.io/badge/made%20for-Claude%20Code-orange.svg)
@@ -25,15 +26,15 @@ format specification and reference examples.
 |---|---|---|
 | [`changelog-pro`](skills/changelog-pro/SKILL.md) | Generates verified changelogs/release notes from git history: Conventional Commits parsing, noise filtering, issue/compare links, semver suggestion, idempotent `CHANGELOG.md` writes — every bullet must cite a real commit hash | "changelog", "release notes", "what has changed since…" |
 | [`eda-quicklook`](skills/eda-quicklook/SKILL.md) | Profiles a CSV with a zero-dependency Python script (types, missing %, stats, ASCII histograms, top values, warnings), then interprets the problems and suggests next steps | "explore this CSV", "EDA", "what does this data look like" |
+| [`notebook-polish`](skills/notebook-polish/SKILL.md) | Reviews and polishes Jupyter notebooks (`.ipynb`) for Data Science work, cleaning them up and making them presentable | "revisa mi notebook", "clean up this notebook", "deja el notebook presentable" |
+| [`repo-onboard`](skills/repo-onboard/SKILL.md) | Produces a fast, token-cheap orientation report for an unfamiliar repo using a deterministic git-based pipeline (file map, hot files, entry points, activity) with strict read budgets | "explain this repo", "onboarding", "qué hace este proyecto" |
+| [`token-diet`](skills/token-diet/SKILL.md) | Frugal-mode operating rules that minimize token consumption without losing output quality; stays active for the rest of the session until turned off | "modo ahorro", "token diet", "save tokens" |
 
 ## Installation
 
 ```bash
 git clone https://github.com/qiuskye/claude-skills ~/.claude/skills-qiuskye
-cp -r ~/.claude/skills-qiuskye/skills/changelog-pro ~/.claude/skills/
-cp -r ~/.claude/skills-qiuskye/skills/eda-quicklook ~/.claude/skills/
-| [`repo-onboard`](skills/repo-onboard/) | Understand any unknown repo in minutes — git-driven map, hot files, entry points, cited report | "explain this repo", "onboarding" |
-| [`token-diet`](skills/token-diet/) | Frugal mode: surgical reads, grep-first, hard token budgets with end-of-task metrics | "modo ahorro", "token diet" |
+cp -r ~/.claude/skills-qiuskye/skills/* ~/.claude/skills/
 ```
 
 Claude Code picks up skills from `~/.claude/skills/` automatically; start a new
@@ -51,6 +52,26 @@ the folders into `<project>/.claude/skills/`.
   interpretation to what the profiler actually printed.
 - **Stdlib only.** Bundled scripts run on a bare `python3` — no `pip install`,
   no environment drift, nothing to break on a colleague's machine.
+
+## Running the tests
+
+The bundled scripts (`eda-quicklook` and `notebook-polish`) ship with
+deterministic unit tests that run on a bare `python3` — no test runner to
+install. From the repository root:
+
+```bash
+# Syntax-check the scripts
+python3 -m py_compile \
+  skills/eda-quicklook/scripts/eda.py \
+  skills/notebook-polish/scripts/nbcheck.py
+
+# Run the unit tests
+python3 -m unittest discover -s tests
+```
+
+The same two steps run in CI on Python 3.9–3.12 (see
+[`.github/workflows/test.yml`](.github/workflows/test.yml) and the **Tests**
+badge above).
 
 ## Credits
 

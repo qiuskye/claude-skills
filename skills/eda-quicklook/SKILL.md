@@ -12,10 +12,13 @@ crunching.
 ## Step 1 — Run the profiler
 
 ```bash
-python3 scripts/eda.py <file.csv>
+python3 scripts/eda.py "<file.csv>"
 ```
 
-(Resolve `scripts/eda.py` relative to this skill's directory.)
+(Resolve `scripts/eda.py` relative to this skill's directory. **Always quote the
+supplied path** so spaces or shell globs are not expanded — e.g.
+`python3 scripts/eda.py "my data.csv"`. The script takes exactly one positional
+path argument, so do not add a `--` separator.)
 
 The script uses only the Python standard library and:
 
@@ -54,3 +57,43 @@ Read the report and give the user a short, opinionated summary:
 Keep the interpretation grounded in the printed report — do not claim patterns
 the output does not show. If the user wants deeper analysis (correlations,
 plots, group-bys), propose it as a follow-up rather than guessing.
+
+## Example output
+
+Profiler output (`python3 scripts/eda.py "users.csv"`, abridged):
+
+```
+============================================================
+EDA quicklook: users.csv
+rows analyzed: 8   columns: 5
+============================================================
+
+-- id (numeric)
+    non-null: 100.0%   unique: 8
+    min=1  max=8  mean=4.5  median=4.5  stdev=2.44949
+
+-- age (numeric)
+    non-null: 87.5%   unique: 7
+    min=28  max=52  mean=36.7143  median=34  stdev=8.93895
+    [        28,         31) ############################## 2
+    [        31,         34) ###############                1
+    ...
+
+-- city (categorical)
+    non-null: 87.5%   unique: 3
+         4  Madrid
+         2  Barcelona
+         1  Valencia
+
+============================================================
+WARNINGS
+  ! 'id': cardinality ~= row count (8/8) -> possible ID column
+```
+
+Interpretation handed to the user (Step 2):
+
+> 8 rows × 5 columns, full read (no sampling). `id` is a join key, not a
+> feature — drop it from any model. `age` and `city` are ~12% missing; small
+> here, but decide impute vs. drop before modeling. `plan` is dominated by
+> `free` (4/8) — watch for class imbalance. Next: parse `signup_date` to check
+> the time range and look for duplicate users.

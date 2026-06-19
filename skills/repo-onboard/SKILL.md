@@ -23,8 +23,14 @@ within the stated line budgets.
 
 ```bash
 git ls-files | head -200
-git ls-files | sed -n 's/.*\.\([a-zA-Z0-9]*\)$/\1/p' | sort | uniq -c | sort -rn | head -10
+git ls-files | sed -n -e 's#.*/##' -e 's/^[^.].*\.\([A-Za-z0-9][A-Za-z0-9]*\)$/\1/p' | sort | uniq -c | sort -rn | head -10
 ```
+
+The `sed` works on the basename only (`s#.*/##`) and the `^[^.]` guard skips
+dotfiles (`.gitignore` is no longer counted as a `gitignore` extension).
+Files with no extension (`Makefile`, `Dockerfile`, `LICENSE`) are intentionally
+omitted by this histogram — count those key files separately from the Step 1
+listing when detecting the project type.
 
 Detect the project type from key files in the listing — read **only** the
 manifests that exist, nothing else:
@@ -73,7 +79,7 @@ List candidates; do not open them unless they are also hot files.
 
 ```bash
 git log --oneline -15
-git shortlog -sn | head -5
+git shortlog -sn HEAD | head -5   # add HEAD: shortlog reads stdin without it (empty in non-interactive shells)
 git log --reverse --format=%ad --date=short | head -1   # repo age (first commit)
 git log -1 --format=%ad --date=short                     # last commit
 ```
@@ -109,3 +115,32 @@ comes from, e.g. "uses Express (`package.json`)", "auth lives in
 for a claim in Steps 1-5, either omit it or mark it explicitly as a guess
 ("probablemente X — no verificado"). Never invent directories, frameworks, or
 behavior.
+
+## Example output
+
+A finished Step 6 report for a small Node CLI (abridged, in the user's
+language):
+
+> **Qué es** — CLI de Node/TypeScript que convierte facturas PDF a CSV.
+> Empaqueta con `tsup` y se publica como binario `inv2csv` (`package.json`).
+>
+> **Arquitectura en 5 líneas** — `src/cli.ts` parsea argumentos y orquesta;
+> `src/parser/` extrae campos del PDF (hot file: `parser/extract.ts`, 22
+> commits); `src/writer.ts` serializa a CSV. Sin estado ni red. Tests en
+> `test/` con `node:test`.
+>
+> **Dónde está cada cosa**
+>
+> | Concern        | Dónde                |
+> |----------------|----------------------|
+> | Entry point    | `src/cli.ts`         |
+> | Extracción PDF | `src/parser/`        |
+> | Salida CSV     | `src/writer.ts`      |
+>
+> **Por dónde empezar a tocar** — `src/cli.ts` (entry point) y
+> `src/parser/extract.ts` (hot file, 22 commits). Build/test:
+> `npm run build && npm test` (scripts en `package.json`).
+>
+> **Riesgos / deuda visible** — un solo contribuidor (bus factor 1,
+> `git shortlog`); `parser/extract.ts` concentra casi toda la actividad y
+> conviene vigilar su tamaño. Último commit hace 8 meses: repo poco activo.

@@ -15,33 +15,56 @@ deterministic sequence — do not skip, reorder, or improvise steps.
 - `AUDIENCE` — `user` (default), `dev`, or `marketing`. See "Audience modes".
 - `PATH` — a subdirectory for monorepo scoping. See "Monorepo support".
 
+> **SECURITY — never interpolate refs or paths unquoted.** Git tag/ref names can
+> contain shell metacharacters (`$`, backtick, `(`, `)`, `|`, `>`, `<`, spaces).
+> A malicious tag like `v5-$(rm -rf ~)` would execute code if pasted into an
+> unquoted command. **Always** assign refs/paths/dates to a shell variable, wrap
+> every use in double quotes (`"$BASE"`, `"$PATH"`, `"$DATE"`), and validate any
+> ref before using it (see Step 1). Do not improvise the commands below.
+
 ## Pipeline
 
 ### Step 1 — Resolve the base ref
 
 ```bash
-git describe --tags --abbrev=0
+BASE="$(git describe --tags --abbrev=0 2>/dev/null)"
 ```
 
-- If this prints a tag, use it as `BASE`.
-- If there are **no tags**, fall back to the first commit:
+- If this prints a tag, use it as `BASE` — but first **validate** it. Reject any
+  ref containing shell metacharacters, then confirm it points at a real commit:
   ```bash
-  git rev-list --max-parents=0 HEAD | tail -1
+  if printf '%s' "$BASE" | grep -q '[$`|<>()[:space:]]'; then
+    echo "Refusing unsafe ref: $BASE" >&2; exit 1
+  fi
+  git rev-parse --verify --quiet -- "$BASE^{commit}" >/dev/null || {
+    echo "Not a valid commit: $BASE" >&2; exit 1
+  }
+  ```
+- If there are **no tags** (`BASE` is empty), fall back to the first commit:
+  ```bash
+  BASE="$(git rev-list --max-parents=0 HEAD | tail -1)"
   ```
 - If the user supplied a `--since` date instead (e.g. "what changed since last
-  Monday"), use `git log --since="<date>"` in Step 2 and skip the `BASE..HEAD` range.
+  Monday"), assign it to a variable and quote it in Step 2
+  (`DATE="last Monday"; git log --since="$DATE" ...`), skipping the
+  `"$BASE"..HEAD` range.
 
 ### Step 2 — Collect the raw commit data
 
 ```bash
-git log BASE..HEAD --no-merges --pretty=format:'%h|%an|%s|%b'
+git log "$BASE"..HEAD --no-merges --pretty=format:'%h%x1f%an%x1f%s%x1f%b%x1e'
 ```
 
-Fields are: short hash, author name, subject, body. This output is the **single
-source of truth** for the rest of the pipeline. Never invent entries that are not
-in it.
+Fields are: short hash, author name, subject, body — separated by the **unit
+separator** `\x1f` (`%x1f`), and each commit record terminated by the **record
+separator** `\x1e` (`%x1e`). These control characters never appear in normal
+commit text, so they survive multiline bodies (`%b`) that contain `|` or
+newlines. Parse by splitting the whole output on `\x1e` into records, then each
+record on `\x1f` into the 4 fields; a single record may span multiple lines.
+This output is the **single source of truth** for the rest of the pipeline.
+Never invent entries that are not in it.
 
-For monorepo scoping, append `-- <PATH>` (see "Monorepo support").
+For monorepo scoping, append `-- "$PATH"` (quoted; see "Monorepo support").
 
 ### Step 3 — Parse Conventional Commits into sections
 
@@ -90,8 +113,8 @@ Normalize it to `https://github.com/OWNER/REPO` (strip `.git`, convert
 
 - Replace every `#123` issue/PR reference in bullets with
   `[#123](https://github.com/OWNER/REPO/issues/123)`.
-- Add a compare link under the version heading:
-  `https://github.com/OWNER/REPO/compare/BASE...HEAD`
+- Add a compare link under the version heading, using the resolved `$BASE`
+  value: `https://github.com/OWNER/REPO/compare/$BASE...HEAD`
   (use the new tag instead of `HEAD` if the user named one).
 - If the remote is not GitHub (or there is no remote), keep plain-text `#123`
   references and omit the compare link — do not fabricate URLs.
@@ -157,12 +180,20 @@ When the user asks for a changelog of a single package/app, scope every
 `git log` invocation with a pathspec:
 
 ```bash
-git log BASE..HEAD --no-merges --pretty=format:'%h|%an|%s|%b' -- packages/my-app
+PATH_SPEC="packages/my-app"
+git log "$BASE"..HEAD --no-merges \
+  --pretty=format:'%h%x1f%an%x1f%s%x1f%b%x1e' -- "$PATH_SPEC"
 ```
 
+Always quote both the ref (`"$BASE"`) and the pathspec (`"$PATH_SPEC"`) — see the
+SECURITY note above; a path is just as injectable as a ref.
+
 Also prefer package-scoped tags (`my-app@1.2.0`, `my-app-v1.2.0`) as `BASE` when
-they exist: `git describe --tags --abbrev=0 --match 'my-app*'`. Write to the
-package's own `CHANGELOG.md` if one exists there.
+they exist (validate them exactly as in Step 1):
+```bash
+BASE="$(git describe --tags --abbrev=0 --match 'my-app*' 2>/dev/null)"
+```
+Write to the package's own `CHANGELOG.md` if one exists there.
 
 ## Credits
 
