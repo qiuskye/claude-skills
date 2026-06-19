@@ -20,6 +20,7 @@ No third-party dependencies.
 
 import csv
 import math
+import re
 import statistics
 import sys
 from collections import Counter
@@ -65,14 +66,29 @@ def is_missing(value: Optional[str]) -> bool:
     return value is None or value.strip().lower() in MISSING_TOKENS
 
 
+# US thousands grouping, e.g. '1,000' or '10,000,000' (no decimal part).
+# Such values must NOT have the comma read as a decimal point.
+_THOUSANDS_RE = re.compile(r"^[+-]?\d{1,3}(,\d{3})+$")
+
+
 def try_float(value: str) -> Optional[float]:
     """Parse a finite float, accepting a decimal comma; return None on failure.
 
     Rejects inf/-inf/nan so non-finite values are never treated as numeric
     (they would corrupt the stats and crash the histogram). Surrounding
     whitespace is ignored so values like ``" 1.5 "`` still parse.
+
+    A comma is only treated as a European decimal separator when the value is
+    not a US thousands-grouped integer (``1,000``): those are parsed by
+    stripping the commas, so they are never silently turned into ``1.0``.
     """
     text = value.strip()
+    if _THOUSANDS_RE.match(text):
+        try:
+            f = float(text.replace(",", ""))
+        except ValueError:
+            return None
+        return f if math.isfinite(f) else None
     for candidate in (text, text.replace(",", ".") if "," in text and "." not in text else None):
         if candidate is None:
             continue
@@ -83,6 +99,26 @@ def try_float(value: str) -> Optional[float]:
         if math.isfinite(f):
             return f
     return None
+
+
+def has_locale_ambiguity(values: Sequence[str]) -> bool:
+    """True when a numeric column mixes comma-grouping and comma-decimal styles.
+
+    A single column should use one convention. If some values look like US
+    thousands grouping (``1,000``) while others look like a European decimal
+    comma (``1,5``), we cannot safely tell them apart, so the caller should
+    warn instead of silently picking one interpretation.
+    """
+    thousands = decimal_comma = False
+    for v in values:
+        text = v.strip()
+        if "," not in text:
+            continue
+        if _THOUSANDS_RE.match(text):
+            thousands = True
+        elif "." not in text:
+            decimal_comma = True
+    return thousands and decimal_comma
 
 
 def looks_iso_date(value: str) -> bool:
@@ -143,8 +179,12 @@ def ascii_histogram(
     for i, count in enumerate(counts):
         left, right = lo + i * step, lo + (i + 1) * step
         bar = "#" * max(1 if count else 0, round(count / peak * width))
+        # The last bin is inclusive of the maximum, so close it with ']'.
+        closing = "]" if i == bins - 1 else ")"
         lines.append(
-            "  [{:>10.4g}, {:>10.4g}) {:<{w}} {}".format(left, right, bar, count, w=width)
+            "  [{:>10.4g}, {:>10.4g}{} {:<{w}} {}".format(
+                left, right, closing, bar, count, w=width
+            )
         )
     return lines
 
@@ -237,6 +277,17 @@ def main(argv: Sequence[str]) -> None:
         return
 
     warnings = []
+
+    # Rows whose field count differs from the header are profiled only up to the
+    # header width: extra trailing fields are otherwise dropped silently and
+    # short rows are padded. Count them so the discrepancy is surfaced.
+    n_header = len(header)
+    ragged = sum(1 for row in rows if len(row) != n_header)
+    if ragged:
+        warnings.append(
+            "{} filas con nº de campos distinto al header".format(ragged)
+        )
+
     for index, name in enumerate(header):
         values = column_values(rows, index)
         present = [v for v in values if not is_missing(v)]
@@ -248,6 +299,11 @@ def main(argv: Sequence[str]) -> None:
         print("    non-null: {:.1f}%   unique: {}".format(non_null_pct, unique))
 
         if col_type == "numeric" and present:
+            if has_locale_ambiguity(present):
+                warnings.append(
+                    "'{}': comas ambiguas (¿miles US o decimal EU?), "
+                    "stats podrían ser incorrectas".format(name)
+                )
             numbers = [f for f in (try_float(v) for v in present) if f is not None]
             if numbers:
                 report_numeric(numbers)

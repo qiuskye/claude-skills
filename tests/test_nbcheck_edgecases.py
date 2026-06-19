@@ -88,8 +88,13 @@ class TestVersionBase(unittest.TestCase):
         self.assertEqual(nbcheck.version_base("final_v2"), "final")
 
     def test_intrinsic_digit_names_are_not_versioned(self):
-        # sha256 has too many trailing digits for the \d{1,2} branch -> None.
-        self.assertIsNone(nbcheck.version_base("sha256"))
+        # More than 3 trailing digits is outside the \d{1,3} branch -> None
+        # (sha2048, model12345). version_base only extracts a candidate base;
+        # the real false-positive guard is at the smell level (a candidate is
+        # only flagged when its un-numbered base is also assigned), exercised
+        # by test_intrinsic_digit_name_does_not_smell below.
+        self.assertIsNone(nbcheck.version_base("sha2048"))
+        self.assertIsNone(nbcheck.version_base("model12345"))
 
     def test_descriptive_name_is_not_versioned(self):
         self.assertIsNone(nbcheck.version_base("df_clean"))

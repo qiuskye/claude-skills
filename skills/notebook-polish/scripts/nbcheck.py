@@ -16,10 +16,12 @@ Stdlib only (json, sys, re). Parses the notebook JSON and reports:
 Exit code: 0 if no warnings, 1 if warnings were found, 2 on usage/parse error.
 """
 
+import io
 import json
 import re
 import sys
-from typing import Any, Optional
+import tokenize
+from typing import Any, List, Optional
 
 MAX_OUTPUT_BYTES = 50 * 1024   # 50 KB
 MAX_CELL_LINES = 40
@@ -37,7 +39,7 @@ ASSIGN_RE = re.compile(r"^\s*([A-Za-z_]\w*)\s*=[^=]")
 # x1, model123).
 SMELL_NAME_RE = re.compile(
     r"^(?:(?P<vbase>[A-Za-z_]*[A-Za-z])_v\d{1,3}"
-    r"|(?P<nbase>[A-Za-z_]*[A-Za-z])\d{1,2})$")
+    r"|(?P<nbase>[A-Za-z_]*[A-Za-z])\d{1,3})$")
 
 
 def version_base(name: str) -> Optional[str]:
@@ -66,6 +68,49 @@ def cell_source(cell: Any) -> str:
     return ""
 
 
+def code_lines(src: str) -> List[str]:
+    """Return ``src`` split into physical lines with strings/comments blanked.
+
+    The import/assignment checks below scan line by line with regexes, which
+    cannot tell real code from text inside a string or comment — so an
+    assignment written inside a triple-quoted SQL block (``query = '''... x =
+    1 ...'''``) used to fire a false "versioned variable" warning. We tokenize
+    the source and overwrite every string- and comment-token's span with
+    spaces (keeping newlines so line numbers and indentation are preserved),
+    leaving only genuine code for the regexes. If the cell does not parse
+    (partial snippets, magics, Python 2), we fall back to the raw lines so the
+    previous best-effort behavior is retained.
+    """
+    raw = src.splitlines(keepends=True)
+    try:
+        tokens = list(tokenize.generate_tokens(io.StringIO(src).readline))
+    except (tokenize.TokenError, IndentationError, SyntaxError, ValueError):
+        return src.splitlines()
+
+    # Work on a mutable list of characters per line so we can blank spans.
+    chars = [list(line) for line in raw]
+    blank_types = (tokenize.STRING, tokenize.COMMENT)
+    if hasattr(tokenize, "FSTRING_START"):
+        blank_types += (tokenize.FSTRING_START, tokenize.FSTRING_MIDDLE,
+                        tokenize.FSTRING_END)
+    for tok in tokens:
+        if tok.type not in blank_types:
+            continue
+        (srow, scol), (erow, ecol) = tok.start, tok.end
+        for row in range(srow, erow + 1):
+            idx = row - 1
+            if idx < 0 or idx >= len(chars):
+                continue
+            line_chars = chars[idx]
+            lo = scol if row == srow else 0
+            hi = ecol if row == erow else len(line_chars)
+            for c in range(lo, min(hi, len(line_chars))):
+                if line_chars[c] != "\n":
+                    line_chars[c] = " "
+    blanked = "".join("".join(lc) for lc in chars)
+    return blanked.splitlines()
+
+
 def output_size(cell: dict) -> int:
     """Return the serialized byte length of a code cell's saved outputs.
 
@@ -74,6 +119,8 @@ def output_size(cell: dict) -> int:
     outputs (e.g. embedded base64 images) that bloat the file and pollute diffs.
     """
     outputs = cell.get("outputs", [])
+    if not isinstance(outputs, list):
+        return 0
     if not outputs:
         return 0
     return len(json.dumps(outputs))
@@ -120,6 +167,21 @@ def analyze(path: str) -> int:
     if not isinstance(nb, dict):
         print("ERROR: %s is not a notebook (top-level JSON is %s, expected an "
               "object)" % (path, type(nb).__name__), file=sys.stderr)
+        sys.exit(2)
+
+    # nbformat 4+ stores cells at the top level. Older notebooks (nbformat 3
+    # and earlier) nest them under worksheets[].cells, which this tool does not
+    # support; silently treating such a file as having zero cells would report
+    # it "clean", so fail loudly instead.
+    nbformat_major = nb.get("nbformat")
+    if "cells" not in nb and (
+        "worksheets" in nb
+        or (isinstance(nbformat_major, int) and nbformat_major < 4)
+    ):
+        print("ERROR: %s uses an unsupported notebook format (nbformat %s with "
+              "worksheets[].cells); convert it to nbformat 4+ first "
+              "(e.g. `jupyter nbconvert --to notebook`)."
+              % (path, nbformat_major), file=sys.stderr)
         sys.exit(2)
 
     cells = nb.get("cells", [])
@@ -182,19 +244,22 @@ def analyze(path: str) -> int:
     # --- Imports -------------------------------------------------------------
     imports = []  # (cell_index, code_cell_position_1based, module, line)
     for pos, (i, cell) in enumerate(code_cells, start=1):
-        for line in cell_source(cell).splitlines():
+        for line in code_lines(cell_source(cell)):
             m = IMPORT_RE.match(line)
             if m:
                 module = (m.group(1) or m.group(2)).split(".")[0]
                 imports.append((i, pos, module, line.strip()))
 
-    seen = {}
-    duplicated = {}  # module -> [cell indices]
+    # A module is "duplicated" if it is imported more than once, whether across
+    # cells (import in cell 1 and cell 5) or twice within the same cell. Track
+    # every cell index that imports each module, keeping repeats so two imports
+    # in one cell surface that cell twice.
+    module_cells = {}  # module -> [cell indices, with repeats]
     for i, pos, module, line in imports:
-        if module in seen and i not in duplicated.get(module, [seen[module]]):
-            duplicated.setdefault(module, [seen[module]]).append(i)
-        else:
-            seen.setdefault(module, i)
+        module_cells.setdefault(module, []).append(i)
+    duplicated = {module: cells_
+                  for module, cells_ in module_cells.items()
+                  if len(cells_) > 1}
 
     late_threshold = max(3, n_code // 4)
     late_imports = [(i, line) for i, pos, module, line in imports
@@ -215,7 +280,7 @@ def analyze(path: str) -> int:
     assigned = {}     # name -> set of cell indices
     candidates = {}   # numbered name -> (base, set of cell indices)
     for i, cell in code_cells:
-        for line in cell_source(cell).splitlines():
+        for line in code_lines(cell_source(cell)):
             m = ASSIGN_RE.match(line)
             if not m:
                 continue

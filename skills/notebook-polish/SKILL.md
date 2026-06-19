@@ -12,10 +12,13 @@ the report, then guide the cleanup in priority order.
 ## Step 1 — Run the checker
 
 ```bash
-python3 scripts/nbcheck.py path/to/notebook.ipynb
+python3 scripts/nbcheck.py "<path/al/notebook.ipynb>"
 ```
 
-(Resolve `scripts/nbcheck.py` relative to this skill's directory.)
+(Resolve `scripts/nbcheck.py` relative to this skill's directory. **Always quote
+the supplied path** so spaces or shell globs are not expanded — e.g.
+`python3 scripts/nbcheck.py "my notebook.ipynb"`. The script takes exactly one
+positional path argument, so do not add a `--` separator.)
 
 The report has sections: Cells, Execution order, Outputs, Imports, Long
 cells, Naming, and a final WARNINGS summary. Exit code 1 means warnings were
@@ -74,7 +77,7 @@ Translate each finding into plain language for the user:
 
 ## Example output
 
-Checker output (`python3 scripts/nbcheck.py analysis.ipynb`, abridged):
+Checker output (`python3 scripts/nbcheck.py "analysis.ipynb"`, abridged):
 
 ```
 [Cells]

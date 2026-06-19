@@ -23,8 +23,14 @@ within the stated line budgets.
 
 ```bash
 git ls-files | head -200
-git ls-files | sed -n 's/.*\.\([a-zA-Z0-9]*\)$/\1/p' | sort | uniq -c | sort -rn | head -10
+git ls-files | sed -n -e 's#.*/##' -e 's/^[^.].*\.\([A-Za-z0-9][A-Za-z0-9]*\)$/\1/p' | sort | uniq -c | sort -rn | head -10
 ```
+
+The `sed` works on the basename only (`s#.*/##`) and the `^[^.]` guard skips
+dotfiles (`.gitignore` is no longer counted as a `gitignore` extension).
+Files with no extension (`Makefile`, `Dockerfile`, `LICENSE`) are intentionally
+omitted by this histogram — count those key files separately from the Step 1
+listing when detecting the project type.
 
 Detect the project type from key files in the listing — read **only** the
 manifests that exist, nothing else:

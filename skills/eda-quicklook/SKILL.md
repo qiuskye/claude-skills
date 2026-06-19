@@ -12,10 +12,13 @@ crunching.
 ## Step 1 — Run the profiler
 
 ```bash
-python3 scripts/eda.py <file.csv>
+python3 scripts/eda.py "<file.csv>"
 ```
 
-(Resolve `scripts/eda.py` relative to this skill's directory.)
+(Resolve `scripts/eda.py` relative to this skill's directory. **Always quote the
+supplied path** so spaces or shell globs are not expanded — e.g.
+`python3 scripts/eda.py "my data.csv"`. The script takes exactly one positional
+path argument, so do not add a `--` separator.)
 
 The script uses only the Python standard library and:
 
@@ -57,7 +60,7 @@ plots, group-bys), propose it as a follow-up rather than guessing.
 
 ## Example output
 
-Profiler output (`python3 scripts/eda.py users.csv`, abridged):
+Profiler output (`python3 scripts/eda.py "users.csv"`, abridged):
 
 ```
 ============================================================
