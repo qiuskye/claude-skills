@@ -33,6 +33,8 @@ HIST_WIDTH = 30            # max width (chars) of the longest histogram bar
 TOP_K = 5                  # how many top values to show for categorical columns
 MISSING_THRESHOLD = 0.30   # warn when more than 30% of a column is missing
 ID_CARDINALITY_RATIO = 0.99  # unique/rows above this flags a likely ID column
+ID_MIN_ROWS = 20           # skip the ID heuristic below this many rows: on tiny
+                           # datasets almost every column is all-unique (false IDs)
 NUMERIC_TYPE_RATIO = 0.9   # share of cells that must parse to call a column numeric/date
 # Tokens treated as missing; 'inf'/'-inf'/'infinity' included so non-finite
 # floats are never counted as numeric (they break stats and the histogram).
@@ -257,7 +259,7 @@ def main(argv: Sequence[str]) -> None:
             warnings.append("'{}': {:.0f}% missing values".format(name, 100 * missing_ratio))
         if present and unique == 1:
             warnings.append("'{}': constant column (single value)".format(name))
-        if n_rows > 1 and unique >= ID_CARDINALITY_RATIO * n_rows:
+        if n_rows >= ID_MIN_ROWS and unique >= ID_CARDINALITY_RATIO * n_rows:
             warnings.append(
                 "'{}': cardinality ~= row count ({}/{}) -> possible ID column".format(
                     name, unique, n_rows

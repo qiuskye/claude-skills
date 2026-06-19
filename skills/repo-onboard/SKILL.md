@@ -73,7 +73,7 @@ List candidates; do not open them unless they are also hot files.
 
 ```bash
 git log --oneline -15
-git shortlog -sn | head -5
+git shortlog -sn HEAD | head -5   # add HEAD: shortlog reads stdin without it (empty in non-interactive shells)
 git log --reverse --format=%ad --date=short | head -1   # repo age (first commit)
 git log -1 --format=%ad --date=short                     # last commit
 ```
