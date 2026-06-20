@@ -66,9 +66,9 @@ def is_missing(value: Optional[str]) -> bool:
     return value is None or value.strip().lower() in MISSING_TOKENS
 
 
-# US thousands grouping, e.g. '1,000' or '10,000,000' (no decimal part).
-# Such values must NOT have the comma read as a decimal point.
-_THOUSANDS_RE = re.compile(r"^[+-]?\d{1,3}(,\d{3})+$")
+# US thousands grouping, e.g. '1,000' or '10,000,000', optionally with a
+# decimal part ('1,000.50'). The comma must NOT be read as a decimal point.
+_THOUSANDS_RE = re.compile(r"^[+-]?\d{1,3}(,\d{3})+(\.\d+)?$")
 
 
 def try_float(value: str) -> Optional[float]:

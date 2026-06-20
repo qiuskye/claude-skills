@@ -67,10 +67,15 @@ class TestTryFloat(unittest.TestCase):
     def test_surrounding_whitespace(self):
         self.assertEqual(eda.try_float("  3.0  "), 3.0)
 
-    def test_comma_only_replaced_when_no_dot(self):
-        # With both separators present the comma is NOT swapped, so
-        # "1,234.5" is not a valid float and returns None (documented behavior).
-        self.assertIsNone(eda.try_float("1,234.5"))
+    def test_us_thousands_with_decimal(self):
+        # "1,234.5" is a US-formatted number: thousands-grouping comma plus a
+        # decimal point. The commas are stripped, so it parses to 1234.5.
+        self.assertEqual(eda.try_float("1,234.5"), 1234.5)
+
+    def test_comma_decimal_not_grouping_returns_none(self):
+        # A comma that is neither valid thousands-grouping nor a lone decimal
+        # comma (here both ',' and '.' present but not a US group) is rejected.
+        self.assertIsNone(eda.try_float("12,34.5"))
 
     def test_non_numeric_returns_none(self):
         self.assertIsNone(eda.try_float("x"))
