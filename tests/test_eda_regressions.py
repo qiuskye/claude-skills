@@ -81,6 +81,43 @@ class TestTryFloatUsThousands(unittest.TestCase):
         self.assertNotIn("mean=2 ", out)
 
 
+class TestTryFloatUsCurrencyDecimals(unittest.TestCase):
+    """try_float must parse US thousands-grouped values WITH a decimal part.
+
+    Regression: values like ``1,000.50`` (grouping comma + decimal point) must
+    parse to their real numeric value, not be rejected or mis-read. The earlier
+    cases without decimals (``1,000``) and the European decimal comma (``1,5``)
+    must keep working unchanged.
+    """
+
+    def test_thousands_with_decimal(self):
+        self.assertEqual(eda.try_float("1,000.50"), 1000.50)
+
+    def test_multi_group_thousands_with_decimal(self):
+        self.assertEqual(eda.try_float("1,234,567.89"), 1234567.89)
+
+    def test_signed_thousands_with_decimal(self):
+        self.assertEqual(eda.try_float("-2,500.00"), -2500.00)
+
+    def test_plain_thousands_still_ok(self):
+        self.assertEqual(eda.try_float("1,000"), 1000.0)
+
+    def test_european_decimal_comma_still_ok(self):
+        self.assertEqual(eda.try_float("1,5"), 1.5)
+
+    def test_currency_column_stats_are_correct(self):
+        # Semicolon-delimited so the US thousands comma is not the delimiter and
+        # cells reach try_float intact as "1,000.50" etc.
+        out = _run_main(
+            "label;amount\na;1,000.50\nb;1,234,567.89\nc;-2,500.00\n"
+        )
+        self.assertIn("(numeric)", out)
+        # mean = (1000.50 + 1234567.89 - 2500.00) / 3 = 411022.7966...
+        self.assertIn("mean=411023", out)
+        self.assertIn("min=-2500", out)
+        self.assertIn("max=1.23457e+06", out)
+
+
 class TestRaggedRowsWarn(unittest.TestCase):
     """main() must surface rows whose field count differs from the header."""
 
