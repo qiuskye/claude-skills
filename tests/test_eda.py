@@ -125,6 +125,44 @@ class TestInferType(unittest.TestCase):
     def test_empty_is_categorical(self):
         self.assertEqual(eda.infer_type([]), "categorical")
 
+    def test_zero_one_is_boolean(self):
+        # a binary flag must read as boolean, not as a numeric range
+        self.assertEqual(eda.infer_type(["0", "1", "1", "0"]), "boolean")
+
+    def test_yes_no_is_boolean(self):
+        self.assertEqual(eda.infer_type(["yes", "no", "yes"]), "boolean")
+
+    def test_numeric_range_is_not_boolean(self):
+        # 0/1/2 has a non-boolean token -> stays numeric
+        self.assertEqual(eda.infer_type(["0", "1", "2", "3"]), "numeric")
+
+
+class TestLooksBoolean(unittest.TestCase):
+    def test_zero_one(self):
+        self.assertTrue(eda.looks_boolean(["0", "1", "0", "1"]))
+
+    def test_true_false(self):
+        self.assertTrue(eda.looks_boolean(["true", "false"]))
+
+    def test_yes_no_case_insensitive(self):
+        self.assertTrue(eda.looks_boolean(["Yes", "NO", "yes"]))
+
+    def test_whitespace_tolerated(self):
+        self.assertTrue(eda.looks_boolean([" yes ", "no"]))
+
+    def test_constant_single_token_is_not_boolean(self):
+        # only one distinct token -> a constant column, not a two-state flag
+        self.assertFalse(eda.looks_boolean(["yes", "yes", "yes"]))
+
+    def test_three_distinct_is_not_boolean(self):
+        self.assertFalse(eda.looks_boolean(["0", "1", "2"]))
+
+    def test_off_vocabulary_is_not_boolean(self):
+        self.assertFalse(eda.looks_boolean(["yes", "maybe"]))
+
+    def test_empty_is_not_boolean(self):
+        self.assertFalse(eda.looks_boolean([]))
+
 
 class TestAsciiHistogram(unittest.TestCase):
     def test_all_values_equal(self):

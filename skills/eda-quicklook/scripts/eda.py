@@ -9,7 +9,7 @@ Features:
     - BOM-safe UTF-8 reading; undecodable bytes are replaced, never fatal.
     - Samples the first MAX_ROWS rows of large files (read lazily, capped early
       so huge files are never fully loaded into memory).
-    - Per-column type inference: numeric, ISO date, or categorical.
+    - Per-column type inference: boolean, numeric, ISO date, or categorical.
     - Per-column report: non-null %, unique count, and either numeric stats
       with an 8-bin ASCII histogram or the top-5 categorical values.
     - Final WARNINGS section: high missing rate, constant columns, and
@@ -43,6 +43,10 @@ MISSING_TOKENS = {
     "", "na", "n/a", "nan", "null", "none", "-",
     "inf", "-inf", "+inf", "infinity", "-infinity", "+infinity",
 }
+# Values (case-insensitive) that mark a two-state boolean/flag column. Kept
+# apart from the numeric path so '0'/'1' and 'yes'/'no' read as a boolean flag
+# rather than a numeric range or a generic category.
+BOOLEAN_TOKENS = {"true", "false", "yes", "no", "y", "n", "t", "f", "0", "1"}
 
 
 def detect_dialect(head: str) -> csv.Dialect:
@@ -138,15 +142,36 @@ def looks_iso_date(value: str) -> bool:
     return True
 
 
-def infer_type(values: Sequence[str]) -> str:
-    """Classify non-missing values as 'numeric', 'date', or 'categorical'.
+def looks_boolean(values: Sequence[str]) -> bool:
+    """True when every non-missing value is one of exactly two boolean tokens.
 
-    A column qualifies as numeric/date when at least NUMERIC_TYPE_RATIO of its
-    non-missing values parse as such, which tolerates a few dirty cells. An
-    empty column (no non-missing values) is treated as categorical.
+    Recognises genuine flag columns (yes/no, 0/1, true/false, case-insensitive)
+    while rejecting both a constant column (all 'yes' -> one token) and a wider
+    numeric range (0/1/2 -> a non-boolean token). Matching is strict (no dirty
+    cells) because a single off-vocabulary value almost always means the column
+    is really numeric or categorical, not boolean.
+    """
+    seen = set()
+    for v in values:
+        token = v.strip().lower()
+        if token not in BOOLEAN_TOKENS:
+            return False
+        seen.add(token)
+    return len(seen) == 2
+
+
+def infer_type(values: Sequence[str]) -> str:
+    """Classify non-missing values as 'boolean', 'numeric', 'date', or 'categorical'.
+
+    Boolean is checked first so a two-state flag (0/1, yes/no) is not mistaken
+    for a numeric range. A column qualifies as numeric/date when at least
+    NUMERIC_TYPE_RATIO of its non-missing values parse as such, which tolerates
+    a few dirty cells. An empty column (no non-missing values) is categorical.
     """
     if not values:
         return "categorical"
+    if looks_boolean(values):
+        return "boolean"
     numeric = sum(1 for v in values if try_float(v) is not None)
     if numeric >= NUMERIC_TYPE_RATIO * len(values):
         return "numeric"

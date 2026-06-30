@@ -133,5 +133,20 @@ class TestRaggedRowsWarn(unittest.TestCase):
         self.assertNotIn("distinto al header", out)
 
 
+class TestBooleanColumnEndToEnd(unittest.TestCase):
+    """main() must label two-state flag columns 'boolean' and count their values."""
+
+    def test_yes_no_column_reports_boolean_with_counts(self):
+        out = _run_main("active\nyes\nno\nyes\nyes\n")
+        self.assertIn("-- active (boolean)", out)
+        self.assertIn("3  yes", out)  # categorical-style value counts
+        self.assertIn("1  no", out)
+
+    def test_zero_one_flag_is_boolean_not_numeric(self):
+        out = _run_main("flag\n0\n1\n1\n0\n")
+        self.assertIn("-- flag (boolean)", out)
+        self.assertNotIn("(numeric)", out)  # must not fall into the numeric path
+
+
 if __name__ == "__main__":
     unittest.main()
